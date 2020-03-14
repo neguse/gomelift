@@ -33,12 +33,24 @@ type Packet struct {
 	Data []interface{}
 }
 
+func NewAckPacket(p *Packet, data []interface{}) Packet {
+	return Packet{
+		Type: Ack,
+		ID:   p.ID,
+		Data: data,
+	}
+}
+
 func EncodePacket(p Packet) (string, error) {
 	data, err := json.Marshal(p.Data)
 	if err != nil {
 		return "", err
 	}
-	return fmt.Sprint(p.Type, string(data)), nil
+	var idStr string
+	if p.ID != nil {
+		idStr = fmt.Sprint(*p.ID)
+	}
+	return fmt.Sprint(p.Type, idStr, string(data)), nil
 }
 
 func isDigit(ch byte) bool {
@@ -87,17 +99,42 @@ func DecodePacket(data string) (Packet, error) {
 	return p, nil
 }
 
+type HandlerFunc func(packet *Packet)
+
+type Handler interface {
+	HandleMessage(packet *Packet)
+}
+
+type nullHandler struct{}
+
+func (h nullHandler) HandleMessage(packet *Packet) {
+}
+
+func (f HandlerFunc) HandleMessage(packet *Packet) {
+	f(packet)
+}
+
 type Client struct {
-	c *eventio.Client
+	c       *eventio.Client
+	handler Handler
 }
 
 func NewClient(url string) *Client {
 	ec := eventio.NewClient(url)
-	c := &Client{c: ec}
+	c := &Client{c: ec, handler: &nullHandler{}}
 	ec.Handle(c)
 	return c
 }
 
+func (c *Client) Handle(h Handler) {
+	c.handler = h
+}
+
+func (c *Client) HandleFunc(fn func(p *Packet)) {
+	c.handler = HandlerFunc(fn)
+}
+
+// HandleMessage handles Event.IO Message.
 func (c *Client) HandleMessage(msg string) {
 	log.Println("recv sio msg", msg)
 	p, err := DecodePacket(msg)
@@ -105,13 +142,20 @@ func (c *Client) HandleMessage(msg string) {
 		log.Panic(err)
 	}
 	log.Println("HandleMessage", p)
+	switch p.Type {
+	case Event:
+		c.handler.HandleMessage(&p)
+	default:
+		log.Println("received", p.Type)
+	}
+
 }
 
 func (c *Client) Open() error {
 	return c.c.Open()
 }
 
-func (c *Client) sendPacket(p Packet) error {
+func (c *Client) SendPacket(p Packet) error {
 	s, err := EncodePacket(p)
 	if err != nil {
 		return err
@@ -127,5 +171,5 @@ func (c *Client) Send(data []interface{}) error {
 		ID:   nil,
 		Type: Event,
 	}
-	return c.sendPacket(p)
+	return c.SendPacket(p)
 }
