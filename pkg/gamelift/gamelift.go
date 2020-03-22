@@ -135,6 +135,34 @@ func (c *client) ReportHealth() {
 	c.client.Send(rmsg)
 }
 
+type GenericError struct {
+	pbuffer.GameLiftResponse
+}
+
+func (err *GenericError) Error() string {
+	return fmt.Sprintf("%v:%v:%v", err.GetStatus().String(), err.GetErrorMessage(), err.GetResponseData())
+}
+
+func ParseGameLiftResponse(data []interface{}) error {
+	var success bool
+	if err := json.Unmarshal(data[0].(json.RawMessage), &success); err != nil {
+		return err
+	}
+	if success {
+		return nil
+	}
+	var str string
+	err := json.Unmarshal([]byte(data[1].(json.RawMessage)), &str)
+	if err != nil {
+		log.Panic(err)
+	}
+	var msg pbuffer.GameLiftResponse
+	if err := proto.Unmarshal([]byte(str), &msg); err != nil {
+		return err
+	}
+	return &GenericError{msg}
+}
+
 func (c *client) ProcessReady(event *pbuffer.ProcessReady) error {
 	data, err := proto.Marshal(event)
 	if err != nil {
@@ -142,7 +170,14 @@ func (c *client) ProcessReady(event *pbuffer.ProcessReady) error {
 	}
 	var rmsg []interface{}
 	rmsg = append(rmsg, proto.MessageName(event), data)
-	c.client.Send(rmsg)
+	ack, err := c.client.SendAck(rmsg)
+	if err != nil {
+		log.Panic(err)
+	}
+	if err := ParseGameLiftResponse(ack); err != nil {
+		return err
+	}
+
 	c.isReady = true
 
 	// wake healthcheck goroutine
@@ -156,11 +191,37 @@ func (c *client) ProcessReady(event *pbuffer.ProcessReady) error {
 }
 
 func (c *client) ProcessEnding(event *pbuffer.ProcessEnding) error {
-	panic("not implemented") // TODO: Implement
+	data, err := proto.Marshal(event)
+	if err != nil {
+		log.Panic(err)
+	}
+	var rmsg []interface{}
+	rmsg = append(rmsg, proto.MessageName(event), data)
+	ack, err := c.client.SendAck(rmsg)
+	if err != nil {
+		log.Panic(err)
+	}
+	if err := ParseGameLiftResponse(ack); err != nil {
+		return err
+	}
+	return nil
 }
 
 func (c *client) ActivateGameSession(event *pbuffer.GameSessionActivate) error {
-	panic("not implemented") // TODO: Implement
+	data, err := proto.Marshal(event)
+	if err != nil {
+		log.Panic(err)
+	}
+	var rmsg []interface{}
+	rmsg = append(rmsg, proto.MessageName(event), data)
+	ack, err := c.client.SendAck(rmsg)
+	if err != nil {
+		log.Panic(err)
+	}
+	if err := ParseGameLiftResponse(ack); err != nil {
+		return err
+	}
+	return nil
 }
 
 func (c *client) TerminateGameSession(event *pbuffer.GameSessionTerminate) error {

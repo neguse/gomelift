@@ -9,10 +9,20 @@ import (
 )
 
 type Handler struct {
+	c gamelift.Client
 }
 
 func (h *Handler) StartGameSession(event *pbuffer.ActivateGameSession) {
 	log.Println("StartGameSession", event)
+
+	if err := h.c.ActivateGameSession(&pbuffer.GameSessionActivate{
+		GameSessionId: event.GetGameSession().GetGameSessionId(),
+		MaxPlayers:    event.GetGameSession().GetMaxPlayers(),
+		Port:          event.GetGameSession().GetPort(),
+	}); err != nil {
+		log.Panic(err)
+	}
+	log.Println("ActivateGameSession complete")
 }
 
 func (h *Handler) UpdateGameSession(event *pbuffer.UpdateGameSession) {
@@ -30,10 +40,10 @@ func (h *Handler) HealthCheck() bool {
 
 func main() {
 	c := gamelift.NewClient()
-	c.Handle(&Handler{})
+	c.Handle(&Handler{c: c})
 	c.Open()
 	// TODO: 接続成功したことをハンドリングできるようにするべき
-	time.Sleep(time.Second)
+	time.Sleep(time.Second * 10000)
 	if err := c.ProcessReady(&pbuffer.ProcessReady{
 		LogPathsToUpload:          []string{},
 		Port:                      7777,
@@ -42,7 +52,14 @@ func main() {
 		log.Panic(err)
 	}
 
+	log.Println("aaa")
 	for {
 		time.Sleep(time.Second * 60)
 	}
+
+	log.Println("bbb")
+	if err := c.ProcessEnding(&pbuffer.ProcessEnding{}); err != nil {
+		log.Panic(err)
+	}
+	log.Println("ccc")
 }

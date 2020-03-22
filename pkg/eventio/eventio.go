@@ -23,6 +23,27 @@ type OpenResponse struct {
 
 type PacketType int
 
+func (pt PacketType) String() string {
+	switch pt {
+	case Open:
+		return "Open"
+	case Close:
+		return "Close"
+	case Ping:
+		return "Ping"
+	case Pong:
+		return "Pong"
+	case Message:
+		return "Message"
+	case Upgrade:
+		return "Upgrade"
+	case Noop:
+		return "Noop"
+	default:
+		return "Unknown"
+	}
+}
+
 const (
 	Open PacketType = iota
 	Close
@@ -80,8 +101,8 @@ func EncodePacket(p Packet) ([]byte, error) {
 func ParsePayloads(data string) ([]Packet, error) {
 	var packets []Packet
 	for len(data) > 0 {
-		log.Println([]byte(data))
-		log.Println(data)
+		//log.Println([]byte(data))
+		//log.Println(data)
 
 		var p Packet
 		n := strings.Index(data, ":")
@@ -117,7 +138,7 @@ func EncodePayloads(packets []Packet) ([]byte, error) {
 
 func ParseResponse(resp *http.Response) ([]Packet, error) {
 	if resp.StatusCode != http.StatusOK {
-		log.Println(resp.StatusCode)
+		//log.Println(resp.StatusCode)
 		return nil, ErrorHttpStatusNotOk
 	}
 	defer resp.Body.Close()
@@ -195,34 +216,42 @@ func (c *Client) poll() error {
 	return nil
 }
 
-func (c *Client) loop(pingTick <-chan time.Time) error {
+func (c *Client) loop() error {
 	f := func() error {
+		pingTick := time.NewTicker(time.Millisecond * time.Duration(c.pingInterval) / 30)
 		for {
-			log.Println("tick", time.Millisecond*time.Duration(c.pingInterval))
 			select {
+			case <-pingTick.C:
+				c.sendPing("probe")
+
 			case p := <-c.sendCh:
-				log.Println("sending", p)
+				log.Println("sending", p.Type)
 				data, err := EncodePayloads([]Packet{p})
 				if err != nil {
 					return err
 				}
-				log.Println("sending", c.FullUrl(), string(data))
+				//log.Println("sending", c.FullUrl(), string(data))
 				{
-					resp, err := http.Post(c.FullUrl(), "text/plain;charset=UTF-8", strings.NewReader(string(data)))
+					err := func() error {
+						resp, err := http.Post(c.FullUrl(), "text/plain;charset=UTF-8", strings.NewReader(string(data)))
+						if err != nil {
+							return err
+						}
+						defer resp.Body.Close()
+						_, err = ioutil.ReadAll(resp.Body)
+						if err != nil {
+							return err
+						}
+						return nil
+					}()
 					if err != nil {
 						return err
 					}
-					defer resp.Body.Close()
-					data, err := ioutil.ReadAll(resp.Body)
-					if err != nil {
-						return err
-					}
-					log.Println(string(data))
+					//log.Println(string(data))
 				}
-			case <-pingTick:
-				c.sendPing("probe")
 			}
 		}
+		return nil
 	}
 	if err := f(); err != nil {
 		log.Panic(err)
@@ -232,7 +261,6 @@ func (c *Client) loop(pingTick <-chan time.Time) error {
 }
 
 func (c *Client) sendPacket(p Packet) {
-	log.Println("send", p)
 	c.sendCh <- p
 }
 
@@ -253,14 +281,14 @@ func (c *Client) sendPing(m string) {
 }
 
 func (c *Client) HandlePacket(p Packet) error {
-	log.Println("recv", p)
+	log.Println("recv", p.Type)
 	switch p.Type {
 	case Open:
 		var r OpenResponse
 		if err := json.Unmarshal([]byte(p.Data), &r); err != nil {
 			log.Panic(err)
 		}
-		log.Println(r)
+		//log.Println(r)
 		return c.HandleOpen(r)
 	case Close:
 	case Ping:
@@ -283,11 +311,11 @@ func (c *Client) Open() error {
 		for {
 			err := c.poll()
 			if err != nil {
-				log.Panic(err)
+				log.Print(err)
 			}
 		}
 	}()
-	go c.loop(time.Tick(time.Second * time.Duration(c.pingInterval)))
+	go c.loop()
 	return nil
 }
 

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"strconv"
+	"sync"
 
 	"github.com/neguse/gomelift/pkg/eventio"
 )
@@ -27,6 +28,27 @@ const (
 	BinaryAck
 )
 
+func (pt PacketType) String() string {
+	switch pt {
+	case Connect:
+		return "Connect"
+	case Disconnect:
+		return "Disconnect"
+	case Event:
+		return "Event"
+	case Ack:
+		return "Ack"
+	case Error:
+		return "Error"
+	case BinaryEvent:
+		return "BinaryEvent"
+	case BinaryAck:
+		return "BinaryAck"
+	default:
+		return "Unknown"
+	}
+}
+
 type Packet struct {
 	Type PacketType
 	ID   *int
@@ -42,15 +64,23 @@ func NewAckPacket(p *Packet, data []interface{}) Packet {
 }
 
 func EncodePacket(p Packet) (string, error) {
-	data, err := json.Marshal(p.Data)
-	if err != nil {
-		return "", err
+	var (
+		data []byte
+		err  error
+	)
+	if len(p.Data) > 0 {
+		data, err = json.Marshal(p.Data)
+		if err != nil {
+			return "", err
+		}
+	} else {
+		data = []byte{}
 	}
 	var idStr string
 	if p.ID != nil {
 		idStr = fmt.Sprint(*p.ID)
 	}
-	return fmt.Sprint(p.Type, idStr, string(data)), nil
+	return fmt.Sprintf("%d%v%v", p.Type, idStr, string(data)), nil
 }
 
 func isDigit(ch byte) bool {
@@ -58,6 +88,7 @@ func isDigit(ch byte) bool {
 }
 
 func DecodePacket(data string) (Packet, error) {
+	log.Println(data)
 	var p Packet
 	if len(data) == 0 {
 		return p, ErrorEmptyPacket
@@ -76,15 +107,16 @@ func DecodePacket(data string) (Packet, error) {
 			break
 		}
 	}
-	log.Println(data, i)
+	//log.Println(data, i)
 	if i > 1 {
 		pid, err := strconv.Atoi(data[1:i])
 		if err != nil {
 			return p, err
 		}
 		p.ID = &pid
+		log.Println(data[1:i], "->", pid)
 	}
-	log.Println(data, i, data[i:])
+	//log.Println(data, i, data[i:])
 	var msgs []json.RawMessage
 	if err := json.Unmarshal([]byte(data[i:]), &msgs); err != nil {
 		return p, err
@@ -92,7 +124,7 @@ func DecodePacket(data string) (Packet, error) {
 	if len(msgs) == 0 {
 		return p, ErrorNullPacket
 	}
-	log.Println(msgs)
+	//log.Println(msgs)
 	for _, msg := range msgs {
 		p.Data = append(p.Data, msg)
 	}
@@ -117,13 +149,26 @@ func (f HandlerFunc) HandleMessage(packet *Packet) {
 type Client struct {
 	c       *eventio.Client
 	handler Handler
+	reqId   int
+	ackCh   map[int]chan []interface{}
+	ackChMu sync.Mutex
 }
 
 func NewClient(url string) *Client {
 	ec := eventio.NewClient(url)
-	c := &Client{c: ec, handler: &nullHandler{}}
+	c := &Client{
+		c:       ec,
+		handler: &nullHandler{},
+		reqId:   10000,
+		ackCh:   make(map[int]chan []interface{})}
 	ec.Handle(c)
 	return c
+}
+
+func (c *Client) NextReqID() int {
+	c.reqId++
+	reqID := c.reqId
+	return reqID
 }
 
 func (c *Client) Handle(h Handler) {
@@ -136,17 +181,26 @@ func (c *Client) HandleFunc(fn func(p *Packet)) {
 
 // HandleMessage handles Event.IO Message.
 func (c *Client) HandleMessage(msg string) {
-	log.Println("recv sio msg", msg)
+	//log.Println("recv sio msg", msg)
 	p, err := DecodePacket(msg)
 	if err != nil {
 		log.Panic(err)
 	}
-	log.Println("HandleMessage", p)
+	//log.Println("HandleMessage", p)
+	log.Println("recv", p.Type)
 	switch p.Type {
 	case Event:
 		c.handler.HandleMessage(&p)
+	case Ack:
+		log.Println("received ack id:", *p.ID)
+		c.ackChMu.Lock()
+		if ackCh, ok := c.ackCh[*p.ID]; ok {
+			ackCh <- p.Data
+			delete(c.ackCh, *p.ID)
+		}
+		c.ackChMu.Unlock()
 	default:
-		log.Println("received", p.Type)
+		log.Println("received ignoring type", p.Type)
 	}
 
 }
@@ -165,6 +219,24 @@ func (c *Client) SendPacket(p Packet) error {
 	return nil
 }
 
+func (c *Client) SendPacketAck(p Packet) ([]interface{}, error) {
+	reqID := c.NextReqID()
+	p.ID = &reqID
+	s, err := EncodePacket(p)
+	if err != nil {
+		return nil, err
+	}
+	c.ackChMu.Lock()
+	c.ackCh[reqID] = make(chan []interface{})
+	c.ackChMu.Unlock()
+	log.Println("sending need ack", reqID, s)
+	c.c.Send(s)
+
+	ack := <-c.ackCh[reqID]
+	log.Println("received ack", ack)
+	return ack, nil
+}
+
 func (c *Client) Send(data []interface{}) error {
 	p := Packet{
 		Data: data,
@@ -172,4 +244,13 @@ func (c *Client) Send(data []interface{}) error {
 		Type: Event,
 	}
 	return c.SendPacket(p)
+}
+
+func (c *Client) SendAck(data []interface{}) ([]interface{}, error) {
+	p := Packet{
+		Data: data,
+		ID:   nil,
+		Type: Event,
+	}
+	return c.SendPacketAck(p)
 }

@@ -2,11 +2,6 @@
 
 ## TODO
 
-### Client->Server->Client Ack
-
-送信時にIDを設定する
-サーバからIDを含むAck受信時に、該当の処理に返す
-
 ### HealthCheck nonblocking
 
 ### Implement not implemented functions
