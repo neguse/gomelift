@@ -24,7 +24,7 @@ func (h *Handler) StartGameSession(event *pbuffer.ActivateGameSession) {
 	}); err != nil {
 		log.Panic(err)
 	}
-	log.Println("ActivateGameSession complete")
+	log.Println("ActivateGameSession complete. sessionID:", *h.c.GetGameSessionId())
 }
 
 func (h *Handler) UpdateGameSession(event *pbuffer.UpdateGameSession) {

@@ -46,10 +46,12 @@ type Client interface {
 }
 
 type client struct {
-	client  *socketio.Client
-	handler Handler
-	isReady bool
-	logger  log.Logger
+	client               *socketio.Client
+	handler              Handler
+	isReady              bool
+	logger               log.Logger
+	gameSessionID        *string
+	processTerminateTime *time.Time
 }
 
 func NewClient(logger log.Logger) Client {
@@ -60,15 +62,14 @@ func (c *client) Handle(h Handler) {
 	c.handler = h
 }
 
-func (c *client) ParseReceivedMessage(str string, msg interface{}, p *socketio.Packet) error {
+func (c *client) HandleReceivedMessage(str string, msg interface{}, p *socketio.Packet) error {
 	err := json.Unmarshal([]byte(str), &msg)
 	if err != nil {
 		c.logger.Panic("failed to unmarshal Message", err)
 	}
-	c.logger.Log("handled StartGameSession", msg)
 	ackPacket := socketio.NewAckPacket(p, []interface{}{true})
 	if err := c.client.SendPacket(ackPacket); err != nil {
-		c.logger.Panic("failed to SendPacket", err)
+		c.logger.Panic("failed to send ack packet", err)
 	}
 	return nil
 }
@@ -92,30 +93,30 @@ func (c *client) Open() error {
 			c.logger.Panic("failed to unmarshal packet name", err)
 		}
 		switch name {
-
 		case `"StartGameSession"`:
 			msg := &pbuffer.ActivateGameSession{}
-			if err := c.ParseReceivedMessage(str, msg, p); err != nil {
+			if err := c.HandleReceivedMessage(str, msg, p); err != nil {
 				c.logger.Panic("failed to parse received ActivateGameSession", err)
 			}
+			c.gameSessionID = stringAddr(msg.GetGameSession().GetGameSessionId())
 			c.handler.StartGameSession(msg)
 		case `"UpdateGameSession"`:
 			msg := &pbuffer.UpdateGameSession{}
-			if err := c.ParseReceivedMessage(str, msg, p); err != nil {
+			if err := c.HandleReceivedMessage(str, msg, p); err != nil {
 				c.logger.Panic("failed to parse received UpdateGameSession", err)
 			}
 			c.handler.UpdateGameSession(msg)
 		case `"TerminateProcess"`:
 			msg := &pbuffer.TerminateProcess{}
-			if err := c.ParseReceivedMessage(str, msg, p); err != nil {
+			if err := c.HandleReceivedMessage(str, msg, p); err != nil {
 				c.logger.Panic("failed to parse received TerminateProcess", err)
 			}
+			c.processTerminateTime = timeAddr(time.Unix(msg.GetTerminationTime(), 0))
 			c.handler.ProcessTerminate(msg)
 		default:
 			c.logger.Log("unhandled packet", name)
 		}
 	})
-
 	return c.client.Open()
 }
 
@@ -262,9 +263,17 @@ func (c *client) GetInstanceCertificate(event *pbuffer.GetInstanceCertificate) (
 }
 
 func (c *client) GetGameSessionId() *string {
-	panic("not implemented") // TODO: Implement
+	return c.GetGameSessionId()
 }
 
 func (c *client) GetTerminationTime() *time.Time {
-	panic("not implemented") // TODO: Implement
+	return c.processTerminateTime
+}
+
+func stringAddr(s string) *string {
+	return &s
+}
+
+func timeAddr(t time.Time) *time.Time {
+	return &t
 }
