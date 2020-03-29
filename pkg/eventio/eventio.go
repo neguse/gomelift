@@ -12,6 +12,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/gorilla/websocket"
 )
 
 type OpenResponse struct {
@@ -166,6 +168,7 @@ type Client struct {
 	upgrades     []string
 	sendCh       chan Packet
 	handler      Handler
+	c            *websocket.Conn
 }
 
 func NewClient(url string) *Client {
@@ -182,7 +185,7 @@ func (c *Client) FullUrl() string {
 		log.Panic(err)
 	}
 	v := u.Query()
-	v.Add("transport", "polling")
+	v.Add("transport", "websocket")
 	v.Add("b64", "1")
 	if c.sid != "" {
 		v.Add("sid", c.sid)
@@ -200,25 +203,29 @@ func (c *Client) HandleOpen(r OpenResponse) error {
 }
 
 func (c *Client) poll() error {
-	resp, err := http.Get(c.FullUrl())
+	typ, data, err := c.c.ReadMessage()
 	if err != nil {
 		return err
 	}
-	packets, err := ParseResponse(resp)
+	if typ != websocket.TextMessage {
+		log.Panic("unsupported message type", typ)
+	}
+	packet, err := ParsePacket(string(data))
 	if err != nil {
 		return err
 	}
-	for _, packet := range packets {
-		if err := c.HandlePacket(packet); err != nil {
-			return err
-		}
+
+	if err := c.HandlePacket(packet); err != nil {
+		return err
 	}
+
 	return nil
 }
 
 func (c *Client) loop() error {
+	log.Println("loop goroutine")
 	f := func() error {
-		pingTick := time.NewTicker(time.Millisecond * time.Duration(c.pingInterval) / 30)
+		pingTick := time.NewTicker(time.Millisecond * time.Duration(c.pingInterval))
 		for {
 			select {
 			case <-pingTick.C:
@@ -226,19 +233,14 @@ func (c *Client) loop() error {
 
 			case p := <-c.sendCh:
 				log.Println("sending", p.Type)
-				data, err := EncodePayloads([]Packet{p})
+				data, err := EncodePacket(p)
 				if err != nil {
 					return err
 				}
-				//log.Println("sending", c.FullUrl(), string(data))
+				// log.Println("sending", c.FullUrl(), string(data))
 				{
 					err := func() error {
-						resp, err := http.Post(c.FullUrl(), "text/plain;charset=UTF-8", strings.NewReader(string(data)))
-						if err != nil {
-							return err
-						}
-						defer resp.Body.Close()
-						_, err = ioutil.ReadAll(resp.Body)
+						err := c.c.WriteMessage(websocket.TextMessage, data)
 						if err != nil {
 							return err
 						}
@@ -257,6 +259,7 @@ func (c *Client) loop() error {
 		log.Panic(err)
 		return err
 	}
+	log.Println("loop goroutine end")
 	return nil
 }
 
@@ -303,17 +306,26 @@ func (c *Client) HandlePacket(p Packet) error {
 }
 
 func (c *Client) Open() error {
-	err := c.poll()
+	wsConn, _, err := websocket.DefaultDialer.Dial(c.FullUrl(), nil)
 	if err != nil {
-		log.Panic(err)
+		return err
 	}
+	c.c = wsConn
+
+	err = c.poll()
+	if err != nil {
+		log.Print(err)
+	}
+
 	go func() {
+		log.Println("poll goroutine")
 		for {
 			err := c.poll()
 			if err != nil {
 				log.Print(err)
 			}
 		}
+		log.Println("poll goroutine end")
 	}()
 	go c.loop()
 	return nil

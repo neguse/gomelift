@@ -41,9 +41,10 @@ func (h *Handler) HealthCheck() bool {
 func main() {
 	c := gamelift.NewClient()
 	c.Handle(&Handler{c: c})
-	c.Open()
-	// TODO: 接続成功したことをハンドリングできるようにするべき
-	time.Sleep(time.Second * 10000)
+	err := c.Open()
+	if err != nil {
+		log.Panic(err)
+	}
 	if err := c.ProcessReady(&pbuffer.ProcessReady{
 		LogPathsToUpload:          []string{},
 		Port:                      7777,
@@ -51,15 +52,12 @@ func main() {
 	}); err != nil {
 		log.Panic(err)
 	}
+	res, err := c.GetInstanceCertificate(&pbuffer.GetInstanceCertificate{})
+	log.Println(res, err)
 
-	log.Println("aaa")
-	for {
-		time.Sleep(time.Second * 60)
-	}
+	time.Sleep(time.Second * 120)
 
-	log.Println("bbb")
 	if err := c.ProcessEnding(&pbuffer.ProcessEnding{}); err != nil {
 		log.Panic(err)
 	}
-	log.Println("ccc")
 }

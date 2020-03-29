@@ -1,6 +1,7 @@
 const io = require('socket.io')(3000);
 
 io.on('connection', (socket) => {
+    console.log('connection', socket);
 
     socket.emit('ccc', (data) => {
         console.log('ccc', data)
@@ -12,6 +13,17 @@ io.on('connection', (socket) => {
         socket.emit('fff', (data) => {
             console.log(data)
         })
+    });
+
+    socket.on('error', (error) => {
+        console.log(error);
+    });
+
+    socket.on('disconnecting', (reason) => {
+        console.log(reason);
+    });
+    socket.on('disconnect', (reason) => {
+        console.log(reason);
     });
     
 })

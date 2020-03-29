@@ -67,7 +67,7 @@ func (c *client) Open() error {
 	}
 	q.Set("sdkVersion", "3.4.0")
 	q.Set("sdkLanguage", "Go")
-	u := "http://127.0.0.1:5757/socket.io/?" + q.Encode()
+	u := "ws://127.0.0.1:5757/socket.io/?" + q.Encode()
 	c.client = socketio.NewClient(u)
 	c.client.HandleFunc(func(p *socketio.Packet) {
 		name := string(p.Data[0].(json.RawMessage))
@@ -164,22 +164,12 @@ func ParseGameLiftResponse(data []interface{}) error {
 }
 
 func (c *client) ProcessReady(event *pbuffer.ProcessReady) error {
-	data, err := proto.Marshal(event)
+	err := c.call(event)
 	if err != nil {
-		log.Panic(err)
-	}
-	var rmsg []interface{}
-	rmsg = append(rmsg, proto.MessageName(event), data)
-	ack, err := c.client.SendAck(rmsg)
-	if err != nil {
-		log.Panic(err)
-	}
-	if err := ParseGameLiftResponse(ack); err != nil {
 		return err
 	}
 
 	c.isReady = true
-
 	// wake healthcheck goroutine
 	go func() {
 		for c.isReady {
@@ -190,7 +180,7 @@ func (c *client) ProcessReady(event *pbuffer.ProcessReady) error {
 	return nil
 }
 
-func (c *client) ProcessEnding(event *pbuffer.ProcessEnding) error {
+func (c *client) call(event proto.Message) error {
 	data, err := proto.Marshal(event)
 	if err != nil {
 		log.Panic(err)
@@ -205,55 +195,73 @@ func (c *client) ProcessEnding(event *pbuffer.ProcessEnding) error {
 		return err
 	}
 	return nil
+}
+
+func (c *client) callReturn(event proto.Message, result proto.Message) error {
+	data, err := proto.Marshal(event)
+	if err != nil {
+		log.Panic(err)
+	}
+	var rmsg []interface{}
+	rmsg = append(rmsg, proto.MessageName(event), data)
+	ack, err := c.client.SendAck(rmsg)
+	if err != nil {
+		log.Panic(err)
+	}
+	if err := ParseGameLiftResponse(ack); err != nil {
+		return err
+	}
+	var str string
+	if err := json.Unmarshal(ack[1].(json.RawMessage), &str); err != nil {
+		return err
+	}
+	if err := json.Unmarshal([]byte(str), result); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (c *client) ProcessEnding(event *pbuffer.ProcessEnding) error {
+	return c.call(event)
 }
 
 func (c *client) ActivateGameSession(event *pbuffer.GameSessionActivate) error {
-	data, err := proto.Marshal(event)
-	if err != nil {
-		log.Panic(err)
-	}
-	var rmsg []interface{}
-	rmsg = append(rmsg, proto.MessageName(event), data)
-	ack, err := c.client.SendAck(rmsg)
-	if err != nil {
-		log.Panic(err)
-	}
-	if err := ParseGameLiftResponse(ack); err != nil {
-		return err
-	}
-	return nil
+	return c.call(event)
 }
 
 func (c *client) TerminateGameSession(event *pbuffer.GameSessionTerminate) error {
-	panic("not implemented") // TODO: Implement
+	return c.call(event)
 }
 
 func (c *client) StartMatchBackfill(event *pbuffer.BackfillMatchmakingRequest) (*pbuffer.BackfillMatchmakingResponse, error) {
-	panic("not implemented") // TODO: Implement
+	result := &pbuffer.BackfillMatchmakingResponse{}
+	return result, c.callReturn(event, result)
 }
 
 func (c *client) StopMatchBackfill(event *pbuffer.StopMatchmakingRequest) error {
-	panic("not implemented") // TODO: Implement
+	return c.call(event)
 }
 
 func (c *client) UpdatePlayerSessionCreationPolicy(event *pbuffer.UpdatePlayerSessionCreationPolicy) error {
-	panic("not implemented") // TODO: Implement
+	return c.call(event)
 }
 
 func (c *client) AcceptPlayerSession(event *pbuffer.AcceptPlayerSession) error {
-	panic("not implemented") // TODO: Implement
+	return c.call(event)
 }
 
 func (c *client) RemovePlayerSession(event *pbuffer.RemovePlayerSession) error {
-	panic("not implemented") // TODO: Implement
+	return c.call(event)
 }
 
 func (c *client) DescribePlayerSessions(event *pbuffer.DescribePlayerSessionsRequest) (*pbuffer.DescribePlayerSessionsResponse, error) {
-	panic("not implemented") // TODO: Implement
+	result := &pbuffer.DescribePlayerSessionsResponse{}
+	return result, c.callReturn(event, result)
 }
 
 func (c *client) GetInstanceCertificate(event *pbuffer.GetInstanceCertificate) (*pbuffer.GetInstanceCertificateResponse, error) {
-	panic("not implemented") // TODO: Implement
+	result := &pbuffer.GetInstanceCertificateResponse{}
+	return result, c.callReturn(event, result)
 }
 
 func (c *client) GetGameSessionId() *string {

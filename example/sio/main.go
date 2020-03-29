@@ -9,7 +9,7 @@ import (
 )
 
 func main() {
-	c := socketio.NewClient("http://127.0.0.1:3000/socket.io/")
+	c := socketio.NewClient("ws://127.0.0.1:3000/socket.io/")
 	c.HandleFunc(func(p *socketio.Packet) {
 		log.Println("handle", p)
 
