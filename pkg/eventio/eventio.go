@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"io/ioutil"
-	"log"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -14,6 +13,8 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
+
+	"github.com/neguse/gomelift/pkg/log"
 )
 
 type OpenResponse struct {
@@ -103,8 +104,6 @@ func EncodePacket(p Packet) ([]byte, error) {
 func ParsePayloads(data string) ([]Packet, error) {
 	var packets []Packet
 	for len(data) > 0 {
-		//log.Println([]byte(data))
-		//log.Println(data)
 
 		var p Packet
 		n := strings.Index(data, ":")
@@ -140,7 +139,6 @@ func EncodePayloads(packets []Packet) ([]byte, error) {
 
 func ParseResponse(resp *http.Response) ([]Packet, error) {
 	if resp.StatusCode != http.StatusOK {
-		//log.Println(resp.StatusCode)
 		return nil, ErrorHttpStatusNotOk
 	}
 	defer resp.Body.Close()
@@ -169,20 +167,22 @@ type Client struct {
 	sendCh       chan Packet
 	handler      Handler
 	c            *websocket.Conn
+	logger       log.Logger
 }
 
-func NewClient(url string) *Client {
+func NewClient(url string, logger log.Logger) *Client {
 	return &Client{
 		url:     url,
 		sendCh:  make(chan Packet, 100),
 		handler: nullHandler{},
+		logger:  logger,
 	}
 }
 
 func (c *Client) FullUrl() string {
 	u, err := url.Parse(c.url)
 	if err != nil {
-		log.Panic(err)
+		c.logger.Panic("failed to parse", err)
 	}
 	v := u.Query()
 	v.Add("transport", "websocket")
@@ -208,7 +208,7 @@ func (c *Client) poll() error {
 		return err
 	}
 	if typ != websocket.TextMessage {
-		log.Panic("unsupported message type", typ)
+		c.logger.Panic("unsupported message type", typ)
 	}
 	packet, err := ParsePacket(string(data))
 	if err != nil {
@@ -223,7 +223,6 @@ func (c *Client) poll() error {
 }
 
 func (c *Client) loop() error {
-	log.Println("loop goroutine")
 	f := func() error {
 		pingTick := time.NewTicker(time.Millisecond * time.Duration(c.pingInterval))
 		for {
@@ -232,12 +231,11 @@ func (c *Client) loop() error {
 				c.sendPing("probe")
 
 			case p := <-c.sendCh:
-				log.Println("sending", p.Type)
+				c.logger.Log("sending", p.Type)
 				data, err := EncodePacket(p)
 				if err != nil {
 					return err
 				}
-				// log.Println("sending", c.FullUrl(), string(data))
 				{
 					err := func() error {
 						err := c.c.WriteMessage(websocket.TextMessage, data)
@@ -249,17 +247,15 @@ func (c *Client) loop() error {
 					if err != nil {
 						return err
 					}
-					//log.Println(string(data))
 				}
 			}
 		}
 		return nil
 	}
 	if err := f(); err != nil {
-		log.Panic(err)
+		c.logger.Panic("error occurred in eventio.Client.loop()", err)
 		return err
 	}
-	log.Println("loop goroutine end")
 	return nil
 }
 
@@ -284,14 +280,13 @@ func (c *Client) sendPing(m string) {
 }
 
 func (c *Client) HandlePacket(p Packet) error {
-	log.Println("recv", p.Type)
+	c.logger.Log("recv", p.Type)
 	switch p.Type {
 	case Open:
 		var r OpenResponse
 		if err := json.Unmarshal([]byte(p.Data), &r); err != nil {
-			log.Panic(err)
+			c.logger.Panic("error occurrend in eventio.Client.HandlePacket()", err)
 		}
-		//log.Println(r)
 		return c.HandleOpen(r)
 	case Close:
 	case Ping:
@@ -314,18 +309,16 @@ func (c *Client) Open() error {
 
 	err = c.poll()
 	if err != nil {
-		log.Print(err)
+		c.logger.Log("error occurred in eventio.Client.Open()", err)
 	}
 
 	go func() {
-		log.Println("poll goroutine")
 		for {
 			err := c.poll()
 			if err != nil {
-				log.Print(err)
+				c.logger.Log("error occurred in eventio.Client.Open()", err)
 			}
 		}
-		log.Println("poll goroutine end")
 	}()
 	go c.loop()
 	return nil

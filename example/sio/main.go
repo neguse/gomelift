@@ -5,11 +5,12 @@ import (
 	"log"
 	"time"
 
+	glog "github.com/neguse/gomelift/pkg/log"
 	"github.com/neguse/gomelift/pkg/socketio"
 )
 
 func main() {
-	c := socketio.NewClient("ws://127.0.0.1:3000/socket.io/")
+	c := socketio.NewClient("ws://127.0.0.1:3000/socket.io/", &glog.StandardLogger{})
 	c.HandleFunc(func(p *socketio.Packet) {
 		log.Println("handle", p)
 

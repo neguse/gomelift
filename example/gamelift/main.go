@@ -4,8 +4,10 @@ import (
 	"log"
 	"time"
 
-	"github.com/neguse/gomelift/pkg/gamelift"
 	"github.com/neguse/gomelift/pkg/proto/pbuffer"
+
+	"github.com/neguse/gomelift/pkg/gamelift"
+	glog "github.com/neguse/gomelift/pkg/log"
 )
 
 type Handler struct {
@@ -39,7 +41,8 @@ func (h *Handler) HealthCheck() bool {
 }
 
 func main() {
-	c := gamelift.NewClient()
+	logger := &glog.StandardLogger{}
+	c := gamelift.NewClient(logger)
 	c.Handle(&Handler{c: c})
 	err := c.Open()
 	if err != nil {

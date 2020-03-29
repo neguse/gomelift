@@ -3,12 +3,13 @@ package gamelift
 import (
 	"encoding/json"
 	"fmt"
-	"log"
 	"net/url"
 	"os"
 	"time"
 
 	"github.com/golang/protobuf/proto"
+
+	"github.com/neguse/gomelift/pkg/log"
 	"github.com/neguse/gomelift/pkg/proto/pbuffer"
 	"github.com/neguse/gomelift/pkg/socketio"
 )
@@ -48,14 +49,28 @@ type client struct {
 	client  *socketio.Client
 	handler Handler
 	isReady bool
+	logger  log.Logger
 }
 
-func NewClient() Client {
-	return &client{}
+func NewClient(logger log.Logger) Client {
+	return &client{logger: logger}
 }
 
 func (c *client) Handle(h Handler) {
 	c.handler = h
+}
+
+func (c *client) ParseReceivedMessage(str string, msg interface{}, p *socketio.Packet) error {
+	err := json.Unmarshal([]byte(str), &msg)
+	if err != nil {
+		c.logger.Panic("failed to unmarshal Message", err)
+	}
+	c.logger.Log("handled StartGameSession", msg)
+	ackPacket := socketio.NewAckPacket(p, []interface{}{true})
+	if err := c.client.SendPacket(ackPacket); err != nil {
+		c.logger.Panic("failed to SendPacket", err)
+	}
+	return nil
 }
 
 func (c *client) Open() error {
@@ -68,54 +83,36 @@ func (c *client) Open() error {
 	q.Set("sdkVersion", "3.4.0")
 	q.Set("sdkLanguage", "Go")
 	u := "ws://127.0.0.1:5757/socket.io/?" + q.Encode()
-	c.client = socketio.NewClient(u)
+	c.client = socketio.NewClient(u, c.logger)
 	c.client.HandleFunc(func(p *socketio.Packet) {
 		name := string(p.Data[0].(json.RawMessage))
 		var str string
 		err := json.Unmarshal([]byte(p.Data[1].(json.RawMessage)), &str)
 		if err != nil {
-			log.Panic(err)
+			c.logger.Panic("failed to unmarshal packet name", err)
 		}
 		switch name {
 
 		case `"StartGameSession"`:
 			msg := &pbuffer.ActivateGameSession{}
-			err := json.Unmarshal([]byte(str), &msg)
-			if err != nil {
-				log.Panic(err)
-			}
-			log.Println("handled StartGameSession", msg)
-			ackPacket := socketio.NewAckPacket(p, []interface{}{true})
-			if err := c.client.SendPacket(ackPacket); err != nil {
-				log.Panic(err)
+			if err := c.ParseReceivedMessage(str, msg, p); err != nil {
+				c.logger.Panic("failed to parse received ActivateGameSession", err)
 			}
 			c.handler.StartGameSession(msg)
 		case `"UpdateGameSession"`:
 			msg := &pbuffer.UpdateGameSession{}
-			err := json.Unmarshal([]byte(str), &msg)
-			if err != nil {
-				log.Panic(err)
-			}
-			log.Println("handled UpdateGameSession", msg)
-			ackPacket := socketio.NewAckPacket(p, []interface{}{true})
-			if err := c.client.SendPacket(ackPacket); err != nil {
-				log.Panic(err)
+			if err := c.ParseReceivedMessage(str, msg, p); err != nil {
+				c.logger.Panic("failed to parse received UpdateGameSession", err)
 			}
 			c.handler.UpdateGameSession(msg)
 		case `"TerminateProcess"`:
 			msg := &pbuffer.TerminateProcess{}
-			err := json.Unmarshal([]byte(str), &msg)
-			if err != nil {
-				log.Panic(err)
-			}
-			log.Println("handled TerminateProcess", msg)
-			ackPacket := socketio.NewAckPacket(p, []interface{}{true})
-			if err := c.client.SendPacket(ackPacket); err != nil {
-				log.Panic(err)
+			if err := c.ParseReceivedMessage(str, msg, p); err != nil {
+				c.logger.Panic("failed to parse received TerminateProcess", err)
 			}
 			c.handler.ProcessTerminate(msg)
 		default:
-			log.Println("unhandled packet", name)
+			c.logger.Log("unhandled packet", name)
 		}
 	})
 
@@ -128,7 +125,7 @@ func (c *client) ReportHealth() {
 	event := &pbuffer.ReportHealth{HealthStatus: health}
 	data, err := proto.Marshal(event)
 	if err != nil {
-		log.Panic(err)
+		c.logger.Panic("failed to marshal ReportHealth", err)
 	}
 	var rmsg []interface{}
 	rmsg = append(rmsg, proto.MessageName(event), data)
@@ -154,7 +151,7 @@ func ParseGameLiftResponse(data []interface{}) error {
 	var str string
 	err := json.Unmarshal([]byte(data[1].(json.RawMessage)), &str)
 	if err != nil {
-		log.Panic(err)
+		return err
 	}
 	var msg pbuffer.GameLiftResponse
 	if err := proto.Unmarshal([]byte(str), &msg); err != nil {
@@ -183,13 +180,13 @@ func (c *client) ProcessReady(event *pbuffer.ProcessReady) error {
 func (c *client) call(event proto.Message) error {
 	data, err := proto.Marshal(event)
 	if err != nil {
-		log.Panic(err)
+		return err
 	}
 	var rmsg []interface{}
 	rmsg = append(rmsg, proto.MessageName(event), data)
 	ack, err := c.client.SendAck(rmsg)
 	if err != nil {
-		log.Panic(err)
+		return err
 	}
 	if err := ParseGameLiftResponse(ack); err != nil {
 		return err
@@ -200,13 +197,13 @@ func (c *client) call(event proto.Message) error {
 func (c *client) callReturn(event proto.Message, result proto.Message) error {
 	data, err := proto.Marshal(event)
 	if err != nil {
-		log.Panic(err)
+		return err
 	}
 	var rmsg []interface{}
 	rmsg = append(rmsg, proto.MessageName(event), data)
 	ack, err := c.client.SendAck(rmsg)
 	if err != nil {
-		log.Panic(err)
+		return err
 	}
 	if err := ParseGameLiftResponse(ack); err != nil {
 		return err

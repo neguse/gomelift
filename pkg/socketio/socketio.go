@@ -4,11 +4,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log"
 	"strconv"
 	"sync"
 
 	"github.com/neguse/gomelift/pkg/eventio"
+	"github.com/neguse/gomelift/pkg/log"
 )
 
 var (
@@ -88,7 +88,6 @@ func isDigit(ch byte) bool {
 }
 
 func DecodePacket(data string) (Packet, error) {
-	log.Println(data)
 	var p Packet
 	if len(data) == 0 {
 		return p, ErrorEmptyPacket
@@ -114,7 +113,6 @@ func DecodePacket(data string) (Packet, error) {
 			return p, err
 		}
 		p.ID = &pid
-		log.Println(data[1:i], "->", pid)
 	}
 	//log.Println(data, i, data[i:])
 	var msgs []json.RawMessage
@@ -152,15 +150,18 @@ type Client struct {
 	reqId   int
 	ackCh   map[int]chan []interface{}
 	ackChMu sync.Mutex
+	logger  log.Logger
 }
 
-func NewClient(url string) *Client {
-	ec := eventio.NewClient(url)
+func NewClient(url string, logger log.Logger) *Client {
+	ec := eventio.NewClient(url, logger)
 	c := &Client{
 		c:       ec,
 		handler: &nullHandler{},
 		reqId:   10000,
-		ackCh:   make(map[int]chan []interface{})}
+		ackCh:   make(map[int]chan []interface{}),
+		logger:  logger,
+	}
 	ec.Handle(c)
 	return c
 }
@@ -181,18 +182,16 @@ func (c *Client) HandleFunc(fn func(p *Packet)) {
 
 // HandleMessage handles Event.IO Message.
 func (c *Client) HandleMessage(msg string) {
-	//log.Println("recv sio msg", msg)
 	p, err := DecodePacket(msg)
 	if err != nil {
-		log.Panic(err)
+		c.logger.Panic("failed to DecodePacket", err)
 	}
-	//log.Println("HandleMessage", p)
-	log.Println("recv", p.Type)
+	c.logger.Log("recv", p.Type)
 	switch p.Type {
 	case Event:
 		c.handler.HandleMessage(&p)
 	case Ack:
-		log.Println("received ack id:", *p.ID)
+		c.logger.Log("recv ack id", *p.ID)
 		c.ackChMu.Lock()
 		if ackCh, ok := c.ackCh[*p.ID]; ok {
 			ackCh <- p.Data
@@ -200,7 +199,7 @@ func (c *Client) HandleMessage(msg string) {
 		}
 		c.ackChMu.Unlock()
 	default:
-		log.Println("received ignoring type", p.Type)
+		c.logger.Log("received ignoring type", p.Type)
 	}
 
 }
@@ -214,7 +213,7 @@ func (c *Client) SendPacket(p Packet) error {
 	if err != nil {
 		return err
 	}
-	log.Println("sending", s)
+	c.logger.Log("sending", s)
 	c.c.Send(s)
 	return nil
 }
@@ -229,11 +228,11 @@ func (c *Client) SendPacketAck(p Packet) ([]interface{}, error) {
 	c.ackChMu.Lock()
 	c.ackCh[reqID] = make(chan []interface{})
 	c.ackChMu.Unlock()
-	log.Println("sending need ack", reqID, s)
+	c.logger.Log("sending need ack", reqID, s)
 	c.c.Send(s)
 
 	ack := <-c.ackCh[reqID]
-	log.Println("received ack", ack)
+	c.logger.Log("received ack", ack)
 	return ack, nil
 }
 
