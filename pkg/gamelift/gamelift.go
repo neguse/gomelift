@@ -99,20 +99,20 @@ func (c *client) Open() error {
 				c.logger.Panic("failed to parse received ActivateGameSession", err)
 			}
 			c.gameSessionID = stringAddr(msg.GetGameSession().GetGameSessionId())
-			c.handler.StartGameSession(msg)
+			go c.handler.StartGameSession(msg)
 		case `"UpdateGameSession"`:
 			msg := &pbuffer.UpdateGameSession{}
 			if err := c.HandleReceivedMessage(str, msg, p); err != nil {
 				c.logger.Panic("failed to parse received UpdateGameSession", err)
 			}
-			c.handler.UpdateGameSession(msg)
+			go c.handler.UpdateGameSession(msg)
 		case `"TerminateProcess"`:
 			msg := &pbuffer.TerminateProcess{}
 			if err := c.HandleReceivedMessage(str, msg, p); err != nil {
 				c.logger.Panic("failed to parse received TerminateProcess", err)
 			}
 			c.processTerminateTime = timeAddr(time.Unix(msg.GetTerminationTime(), 0))
-			c.handler.ProcessTerminate(msg)
+			go c.handler.ProcessTerminate(msg)
 		default:
 			c.logger.Log("unhandled packet", name)
 		}
@@ -263,7 +263,7 @@ func (c *client) GetInstanceCertificate(event *pbuffer.GetInstanceCertificate) (
 }
 
 func (c *client) GetGameSessionId() *string {
-	return c.GetGameSessionId()
+	return c.gameSessionID
 }
 
 func (c *client) GetTerminationTime() *time.Time {
