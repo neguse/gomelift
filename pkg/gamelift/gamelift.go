@@ -5,8 +5,10 @@ import (
 	"fmt"
 	"net/url"
 	"os"
+	"strings"
 	"time"
 
+	"github.com/golang/protobuf/jsonpb"
 	"github.com/golang/protobuf/proto"
 
 	"github.com/neguse/gomelift/pkg/log"
@@ -155,7 +157,7 @@ func ParseGameLiftResponse(data []interface{}) error {
 		return err
 	}
 	var msg pbuffer.GameLiftResponse
-	if err := proto.Unmarshal([]byte(str), &msg); err != nil {
+	if err := jsonpb.Unmarshal(strings.NewReader(str), &msg); err != nil {
 		return err
 	}
 	return &GenericError{msg}
@@ -213,7 +215,7 @@ func (c *client) callReturn(event proto.Message, result proto.Message) error {
 	if err := json.Unmarshal(ack[1].(json.RawMessage), &str); err != nil {
 		return err
 	}
-	if err := json.Unmarshal([]byte(str), result); err != nil {
+	if err := jsonpb.Unmarshal(strings.NewReader(str), result); err != nil {
 		return err
 	}
 	return nil
