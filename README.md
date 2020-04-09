@@ -28,7 +28,7 @@ Build and upload gamelift build.
 On Linux:
 cd /path/to/github.com/neguse/gomelift
 go build -o example/gamelift/server/server.exe example/gamelift/server/server.go
-aws gamelift upload-build --operating-system  --build-root example/gamelift/server --name gomelift --build-version 1 --region ap-northeast-1
+aws gamelift upload-build --operating-system AMAZON_LINUX_2 --build-root example/gamelift/server --name gomelift --build-version 1 --region ap-northeast-1
 ```
 
 If you are working on Windows or OSX, set GOOS=linux and GOARCH=amd64 before you run `go build` and reset it before `go run`.
